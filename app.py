@@ -140,6 +140,21 @@ def api_health():
     })
 
 
+@app.route("/api/docs")
+def api_docs():
+    return jsonify({
+        "openapi": "3.0.0",
+        "info": {"title": "LLM Oil & Gas Assistant", "version": "1.0.0"},
+        "paths": {
+            "/api/health": {"get": {"summary": "Health check"}},
+            "/api/models": {"get": {"summary": "Model info"}},
+            "/api/ask": {"post": {"summary": "Ask a question using RAG + QA models"}},
+            "/api/summarize": {"post": {"summary": "Summarize text"}},
+            "/api/search": {"post": {"summary": "Search knowledge base"}},
+        }
+    })
+
+
 if __name__ == "__main__":
     load_models()
     print("\n  LLM Oil & Gas Assistant - Starting server on port 5015")
