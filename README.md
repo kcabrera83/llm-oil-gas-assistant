@@ -1,20 +1,38 @@
 # LLM Oil & Gas Assistant
 
-An LLM-powered Q&A assistant for oil & gas documentation using retrieval-augmented generation (RAG).
+An LLM-powered Q&A assistant for oil & gas documentation using retrieval-augmented generation (RAG) with vector embeddings.
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|-----------|
+| LLM Framework | **LangChain** - LLM orchestration and RAG |
+| Vector Store | **FAISS** - similarity search and indexing |
+| Embeddings | **sentence-transformers** - semantic embeddings |
+| Data Processing | pandas, numpy, joblib |
+| Web Server | **FastAPI** + uvicorn |
+| Monitoring | prometheus-fastapi-instrumentator |
+| Validation | pydantic v2 |
+
+### Key Libraries
+- LangChain - LLM orchestration, chaining, and RAG pipeline
+- FAISS - Facebook AI Similarity Search for vector indexing
+- sentence-transformers - Sentence embedding models
+- FastAPI - Modern async web framework
 
 ## Overview
 
-This project provides an intelligent question-answering system for oil and gas industry documentation. It uses TF-IDF vectorization and cosine similarity for document retrieval, extractive QA for answer generation, and extractive summarization for content summarization.
+This project provides an intelligent question-answering system for oil and gas industry documentation. It uses vector embeddings and semantic search for document retrieval, and generates answers using retrieval-augmented generation (RAG).
 
 ## Architecture
 
 The system follows a Retrieval-Augmented Generation (RAG) pattern:
 
 1. **Knowledge Base**: 60+ pre-built documents covering Drilling, Safety, Equipment, Production, and Reservoir engineering topics.
-2. **Text Processor**: TF-IDF vectorization with cosine similarity search for document retrieval.
-3. **RAG Engine**: Retrieves relevant documents and generates answers from the knowledge base.
+2. **Vector Store**: FAISS indexing with sentence-transformer embeddings for semantic search.
+3. **RAG Engine**: LangChain-based retrieval and generation pipeline.
 4. **QA Model**: Extractive question-answering that finds answer spans within retrieved documents.
-5. **Summarizer**: Extractive text summarization using sentence scoring.
+5. **Summarizer**: Text summarization using sentence scoring.
 
 ## Project Structure
 
@@ -27,19 +45,19 @@ llm-oil-gas-assistant/
       documents.json           # Pre-built knowledge base (60+ topics)
     models/
       __init__.py
-      rag_engine.py            # RAG engine (TF-IDF + retrieval)
+      rag_engine.py            # RAG engine (FAISS + LangChain)
       qa_model.py              # Extractive QA model
       summarizer.py            # Text summarizer
     utils/
       __init__.py
-      text_processor.py        # Text chunking, TF-IDF, similarity
+      text_processor.py        # Text chunking, embeddings, similarity
   outputs/models/              # Trained model artifacts
   templates/
     index.html                 # Web interface
   .github/workflows/
     ci.yml                     # CI/CD pipeline
   train.py                     # Training script
-  app.py                       # Flask API server
+  app.py                       # FastAPI API server
   test_api.py                  # API tests
   requirements.txt
   setup.py
@@ -60,7 +78,7 @@ pip install -r requirements.txt
 python train.py
 ```
 
-This builds the TF-IDF index from the knowledge base and saves model artifacts to `outputs/models/`.
+This builds the FAISS index from the knowledge base and saves model artifacts to `outputs/models/`.
 
 ### 2. Start the API Server
 
@@ -108,13 +126,6 @@ python test_api.py
 - **Production**: Primary/EOR recovery, well testing, flow assurance, artificial lift, gas processing, reservoir characterization, workovers, gas lift, LNG
 - **Reservoir**: Reservoir engineering, multiphase flow, stimulation design, formation damage, EOR screening, seismic methods
 
-## Technology Stack
+---
 
-- Python 3.8+
-- Flask (web framework)
-- scikit-learn (TF-IDF vectorization)
-- NumPy (numerical operations)
-- Pandas (data handling)
-- joblib (model persistence)
-
-## Elaborado por Ing. Kelvin Cabrera
+Elaborado por Ing. Kelvin Cabrera
