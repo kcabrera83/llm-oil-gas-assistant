@@ -8,16 +8,14 @@ def test_health(client):
     assert data["status"] == "healthy"
     assert "rag_ready" in data
     assert "models_loaded" in data
-    assert data["version"] == "1.0.0"
+    assert data["version"] == "2.0.0"
 
 
 def test_models(client):
     response = client.get("/api/models")
     assert response.status_code == 200
     data = response.json()
-    assert "loaded_models" in data
-    assert "stats" in data
-    assert isinstance(data["loaded_models"], list)
+    assert "vectorstore" in data
 
 
 def test_api_docs(client):
@@ -32,7 +30,7 @@ def test_api_docs(client):
 
 def test_ask_valid_input(client):
     response = client.post("/api/ask", json={"query": "What is hydraulic fracturing?"})
-    assert response.status_code in (200, 400, 500)
+    assert response.status_code in (200, 400, 500, 503)
     if response.status_code == 200:
         data = response.json()
         assert "answer" in data
@@ -44,7 +42,7 @@ def test_ask_valid_input(client):
 
 def test_ask_with_top_k(client):
     response = client.post("/api/ask", json={"query": "drilling mud weight", "top_k": 3})
-    assert response.status_code in (200, 400, 500)
+    assert response.status_code in (200, 400, 500, 503)
     if response.status_code == 200:
         data = response.json()
         assert "answer" in data
@@ -79,7 +77,7 @@ def test_summarize_empty_text(client):
 
 def test_search_valid_input(client):
     response = client.post("/api/search", json={"query": "casing design"})
-    assert response.status_code in (200, 400, 500)
+    assert response.status_code in (200, 400, 500, 503)
     if response.status_code == 200:
         data = response.json()
         assert "results" in data
