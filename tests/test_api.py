@@ -75,16 +75,6 @@ def test_summarize_empty_text(client):
     assert response.status_code == 400
 
 
-def test_search_valid_input(client):
+def test_search_removed(client):
     response = client.post("/api/search", json={"query": "casing design"})
-    assert response.status_code in (200, 400, 500, 503)
-    if response.status_code == 200:
-        data = response.json()
-        assert "results" in data
-        assert "total_results" in data
-        assert isinstance(data["results"], list)
-
-
-def test_search_empty_query(client):
-    response = client.post("/api/search", json={"query": ""})
-    assert response.status_code == 400
+    assert response.status_code == 404
