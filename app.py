@@ -4,24 +4,20 @@ import os
 import sys
 import json
 import time
-import joblib
-from typing import Any
+from typing import Any, List
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from llm_assistant.models.rag_engine import RAGEngine
-from llm_assistant.models.qa_model import QAModel
-from llm_assistant.models.summarizer import Summarizer
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
 app = FastAPI(
     title="LLM Oil & Gas Assistant",
     description="RAG + QA LLM Assistant for Oil & Gas domain",
-    version="1.0.0",
+    version="2.0.0",
 )
 
 app.add_middleware(
@@ -35,36 +31,22 @@ app.add_middleware(
 Instrumentator().instrument(app).expose(app)
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs", "models")
-KB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "llm_assistant", "knowledge_base", "documents.json")
+FAISS_INDEX_DIR = os.path.join(OUTPUT_DIR, "faiss_index")
 
-rag_engine = None
-qa_model = None
-summarizer = None
-loaded_models = []
+models = {}
 
 
 def load_models():
-    global rag_engine, qa_model, summarizer, loaded_models
-    rag_engine = RAGEngine()
-    qa_model = QAModel()
-    summarizer = Summarizer()
-
-    rag_path = os.path.join(OUTPUT_DIR, "rag_engine.joblib")
-    qa_path = os.path.join(OUTPUT_DIR, "qa_model.joblib")
-
-    if os.path.exists(rag_path):
-        rag_engine = joblib.load(rag_path)
-        loaded_models.append("RAG Engine (TF-IDF)")
-
-    if os.path.exists(qa_path):
-        qa_model = joblib.load(qa_path)
-        loaded_models.append("QA Model (Extractive)")
-
-    loaded_models.append("Summarizer (Extractive)")
-
-    if rag_engine and rag_engine.is_ready:
-        docs = rag_engine.documents
-        print(f"Loaded {len(docs)} documents into knowledge base")
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    if os.path.exists(FAISS_INDEX_DIR):
+        models["vectorstore"] = FAISS.load_local(FAISS_INDEX_DIR, embeddings, allow_dangerous_deserialization=True)
+        models["ready"] = True
+        print(f"  Loaded FAISS index from {FAISS_INDEX_DIR}")
+    else:
+        models["vectorstore"] = None
+        models["ready"] = False
+        print("  Warning: FAISS index not found. Run train.py first.")
+    models["embeddings"] = embeddings
 
 
 class AskRequest(BaseModel):
@@ -75,11 +57,8 @@ class AskRequest(BaseModel):
 class AskResponse(BaseModel):
     query: str
     answer: str
-    confidence: float
-    sources: Any
+    sources: List[Any]
     num_retrieved: int
-    qa_answer: str
-    qa_confidence: float
     processing_time_ms: float
 
 
@@ -110,30 +89,33 @@ class SearchResponse(BaseModel):
 
 @app.on_event("startup")
 async def startup_event():
-    load_models()
+    try:
+        load_models()
+    except Exception as e:
+        print(f"[WARN] Error loading models: {e}")
 
 
 @app.get("/api/health")
 async def health():
     return {
         "status": "healthy",
-        "rag_ready": rag_engine.is_ready if rag_engine else False,
-        "models_loaded": loaded_models,
-        "version": "1.0.0",
+        "rag_ready": models.get("ready", False),
+        "models_loaded": ["FAISS Vector Store (HuggingFace embeddings)"] if models.get("ready") else [],
+        "version": "2.0.0",
     }
 
 
 @app.get("/api/models")
 async def models_info():
-    stats = {}
-    if rag_engine:
-        stats.update(rag_engine.get_stats())
-    if qa_model:
-        stats["qa_model"] = qa_model.get_stats()
-    return {
-        "loaded_models": loaded_models,
-        "stats": stats,
+    info = {
+        "vectorstore": {
+            "type": "FAISS + HuggingFace all-MiniLM-L6-v2",
+            "ready": models.get("ready", False),
+        },
     }
+    if models.get("vectorstore"):
+        info["total_vectors"] = models["vectorstore"].index.ntotal
+    return info
 
 
 @app.post("/api/ask", response_model=AskResponse)
@@ -141,20 +123,21 @@ async def api_ask(request: AskRequest):
     query = request.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="Query is required")
+    if not models.get("vectorstore"):
+        raise HTTPException(status_code=503, detail="Vector store not loaded")
 
     t0 = time.time()
-    answer_result = rag_engine.generate_answer(query, top_k=request.top_k)
-    qa_result = qa_model.extract_answer(query, top_k=request.top_k)
+    docs = models["vectorstore"].similarity_search(query, k=request.top_k)
+    context = "\n".join([d.page_content for d in docs])
+    answer = context[:500] if context else "No relevant documents found."
+    sources = [{"title": d.metadata.get("title", ""), "category": d.metadata.get("category", ""), "source": d.metadata.get("source", "")} for d in docs]
     elapsed = time.time() - t0
 
     return AskResponse(
         query=query,
-        answer=answer_result["answer"],
-        confidence=answer_result["confidence"],
-        sources=answer_result["sources"],
-        num_retrieved=answer_result["num_retrieved"],
-        qa_answer=qa_result["answer"],
-        qa_confidence=qa_result["confidence"],
+        answer=answer,
+        sources=sources,
+        num_retrieved=len(docs),
         processing_time_ms=round(elapsed * 1000, 2),
     )
 
@@ -166,14 +149,16 @@ async def api_summarize(request: SummarizeRequest):
         raise HTTPException(status_code=400, detail="Text is required")
 
     t0 = time.time()
-    result = summarizer.summarize(text, num_sentences=request.num_sentences)
+    sentences = [s.strip() for s in text.split(".") if s.strip()]
+    num = min(request.num_sentences, len(sentences))
+    summary = ". ".join(sentences[:num]) + "." if num > 0 else ""
     elapsed = time.time() - t0
 
     return SummarizeResponse(
-        summary=result.get("summary", ""),
-        original_length=result.get("original_length", 0),
-        summary_length=result.get("summary_length", 0),
-        num_sentences=result.get("num_sentences", request.num_sentences),
+        summary=summary,
+        original_length=len(text),
+        summary_length=len(summary),
+        num_sentences=num,
         processing_time_ms=round(elapsed * 1000, 2),
     )
 
@@ -183,9 +168,20 @@ async def api_search(request: SearchRequest):
     query = request.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="Query is required")
+    if not models.get("vectorstore"):
+        raise HTTPException(status_code=503, detail="Vector store not loaded")
 
     t0 = time.time()
-    results = rag_engine.retrieve(query, top_k=request.top_k)
+    results_with_scores = models["vectorstore"].similarity_search_with_score(query, k=request.top_k)
+    results = []
+    for doc, score in results_with_scores:
+        results.append({
+            "title": doc.metadata.get("title", ""),
+            "category": doc.metadata.get("category", ""),
+            "source": doc.metadata.get("source", ""),
+            "score": float(score),
+            "content": doc.page_content[:200],
+        })
     elapsed = time.time() - t0
 
     return SearchResponse(
@@ -200,11 +196,11 @@ async def api_search(request: SearchRequest):
 async def api_docs():
     return {
         "openapi": "3.0.0",
-        "info": {"title": "LLM Oil & Gas Assistant", "version": "1.0.0"},
+        "info": {"title": "LLM Oil & Gas Assistant", "version": "2.0.0"},
         "paths": {
             "/api/health": {"get": {"summary": "Health check"}},
             "/api/models": {"get": {"summary": "Model info"}},
-            "/api/ask": {"post": {"summary": "Ask a question using RAG + QA models"}},
+            "/api/ask": {"post": {"summary": "Ask a question using FAISS RAG"}},
             "/api/summarize": {"post": {"summary": "Summarize text"}},
             "/api/search": {"post": {"summary": "Search knowledge base"}},
         }
@@ -217,4 +213,3 @@ if __name__ == "__main__":
     print("\n  LLM Oil & Gas Assistant - Starting server on port 5015")
     print("  Elaborado por Ing. Kelvin Cabrera\n")
     uvicorn.run(app, host="0.0.0.0", port=5015)
-

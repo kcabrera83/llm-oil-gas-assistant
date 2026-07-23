@@ -1,22 +1,51 @@
-"""Training script - builds knowledge base index and saves to outputs/models/."""
+"""Training script - builds FAISS vector store index and saves to outputs/models/."""
 
 import os
 import sys
 import json
 import time
-import joblib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.document_loaders import TextLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.schema import Document
+
 from llm_assistant.data_generator import generate_knowledge_base
-from llm_assistant.utils.text_processor import TextProcessor
-from llm_assistant.models.rag_engine import RAGEngine
-from llm_assistant.models.qa_model import QAModel
-from llm_assistant.models.summarizer import Summarizer
 
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs", "models")
 KB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "llm_assistant", "knowledge_base", "documents.json")
+FAISS_INDEX_DIR = os.path.join(OUTPUT_DIR, "faiss_index")
+
+
+def build_rag_pipeline(all_docs):
+    """Build RAG pipeline with LangChain + FAISS"""
+    documents = []
+    for doc in all_docs:
+        page_content = doc.get("content", "")
+        metadata = {
+            "title": doc.get("title", ""),
+            "category": doc.get("category", ""),
+            "source": doc.get("source", ""),
+            "id": doc.get("id", 0),
+        }
+        documents.append(Document(page_content=page_content, metadata=metadata))
+
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    docs = text_splitter.split_documents(documents)
+
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    vectorstore = FAISS.from_documents(docs, embeddings)
+    return vectorstore, embeddings, len(docs)
+
+
+def search_similar(query, vectorstore, k=5):
+    """Search for similar documents using FAISS"""
+    results = vectorstore.similarity_search_with_score(query, k=k)
+    return results
 
 
 def main():
@@ -28,13 +57,13 @@ def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     # Step 1: Generate synthetic knowledge base
-    print("\n[1/5] Generating synthetic oil & gas knowledge base...")
+    print("\n[1/4] Generating synthetic oil & gas knowledge base...")
     t0 = time.time()
     synthetic_docs = generate_knowledge_base()
     print(f"  Generated {len(synthetic_docs)} synthetic documents in {time.time() - t0:.2f}s")
 
     # Step 2: Load pre-built knowledge base
-    print("\n[2/5] Loading pre-built knowledge base...")
+    print("\n[2/4] Loading pre-built knowledge base...")
     t0 = time.time()
     if os.path.exists(KB_PATH):
         with open(KB_PATH, "r", encoding="utf-8") as f:
@@ -47,44 +76,34 @@ def main():
     # Merge documents
     all_docs = []
     for doc in synthetic_docs:
-        all_doc = {"title": doc["title"], "category": doc["category"], "content": doc["content"], "source": doc["source"]}
-        all_doc["id"] = len(all_docs) + 1
-        all_docs.append(all_doc)
+        entry = {"title": doc["title"], "category": doc["category"], "content": doc["content"], "source": doc["source"]}
+        entry["id"] = len(all_docs) + 1
+        all_docs.append(entry)
     for doc in kb_docs:
-        doc_entry = {"title": doc["title"], "category": doc["category"], "content": doc["content"], "source": doc["source"]}
+        entry = {"title": doc["title"], "category": doc["category"], "content": doc["content"], "source": doc["source"]}
         if "id" not in doc:
-            doc_entry["id"] = len(all_docs) + 1
+            entry["id"] = len(all_docs) + 1
         else:
-            doc_entry["id"] = doc["id"]
-        all_docs.append(doc_entry)
+            entry["id"] = doc["id"]
+        all_docs.append(entry)
 
     print(f"  Total documents in merged knowledge base: {len(all_docs)}")
 
-    # Step 3: Build RAG index
-    print("\n[3/5] Building RAG index (TF-IDF vectors)...")
+    # Step 3: Build FAISS vector store
+    print("\n[3/4] Building FAISS vector store (HuggingFace embeddings)...")
     t0 = time.time()
-    rag_engine = RAGEngine()
-    rag_engine.build_index(all_docs)
-    rag_stats = rag_engine.get_stats()
-    print(f"  Index built in {time.time() - t0:.2f}s")
-    print(f"  - Documents indexed: {rag_stats['total_documents']}")
-    print(f"  - Text chunks created: {rag_stats['total_chunks']}")
-    print(f"  - Vocabulary size: {rag_stats['vocabulary_size']}")
+    vectorstore, embeddings, num_chunks = build_rag_pipeline(all_docs)
+    print(f"  Vector store built in {time.time() - t0:.2f}s")
+    print(f"  - Documents indexed: {len(all_docs)}")
+    print(f"  - Text chunks created: {num_chunks}")
 
-    # Step 4: Build QA model
-    print("\n[4/5] Building QA model...")
+    # Step 4: Save FAISS index
+    print("\n[4/4] Saving FAISS index to disk...")
     t0 = time.time()
-    qa_model = QAModel()
-    qa_model.load_documents(all_docs)
-    print(f"  QA model loaded in {time.time() - t0:.2f}s")
-
-    # Step 5: Save models
-    print("\n[5/5] Saving models to disk...")
-    t0 = time.time()
-    joblib.dump(rag_engine, os.path.join(OUTPUT_DIR, "rag_engine.joblib"))
-    joblib.dump(qa_model, os.path.join(OUTPUT_DIR, "qa_model.joblib"))
-    print(f"  Models saved in {time.time() - t0:.2f}s")
-    print(f"  Output directory: {OUTPUT_DIR}")
+    os.makedirs(FAISS_INDEX_DIR, exist_ok=True)
+    vectorstore.save_local(FAISS_INDEX_DIR)
+    print(f"  FAISS index saved in {time.time() - t0:.2f}s")
+    print(f"  Output directory: {FAISS_INDEX_DIR}")
 
     # Test retrieval
     print("\n" + "=" * 60)
@@ -100,18 +119,18 @@ def main():
     ]
 
     for q in test_queries:
-        result = rag_engine.generate_answer(q)
+        results = search_similar(q, vectorstore, k=3)
         print(f"\n  Query: '{q}'")
-        print(f"  Sources found: {result['num_retrieved']}")
-        print(f"  Confidence: {result['confidence']:.4f}")
-        print(f"  Answer preview: {result['answer'][:120]}...")
+        print(f"  Results found: {len(results)}")
+        for doc, score in results:
+            print(f"    - [{score:.4f}] {doc.metadata.get('title', 'N/A')}")
 
     print("\n" + "=" * 60)
     print("  Training Complete")
     print("=" * 60)
     print(f"  Total documents: {len(all_docs)}")
     print(f"  Categories: {set(d['category'] for d in all_docs)}")
-    print(f"  Models saved to: {OUTPUT_DIR}")
+    print(f"  FAISS index saved to: {FAISS_INDEX_DIR}")
     print()
 
 
