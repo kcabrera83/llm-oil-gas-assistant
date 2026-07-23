@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Oil & Gas Assistant</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; height: 100vh; display: flex; flex-direction: column; }
+        .header { background: #1e293b; border-bottom: 1px solid #334155; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; }
+        .header h1 { font-size: 18px; font-weight: 600; color: #8b5cf6; }
+        .header .subtitle { font-size: 12px; color: #94a3b8; }
+        .header .status { display: flex; align-items: center; gap: 8px; }
+        .header .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; }
+        .main { display: flex; flex: 1; overflow: hidden; }
+        .sidebar { width: 300px; background: #1e293b; border-right: 1px solid #334155; display: flex; flex-direction: column; padding: 16px; overflow-y: auto; }
+        .sidebar h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: #8b5cf6; margin-bottom: 12px; }
+        .stat-card { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 12px; margin-bottom: 8px; }
+        .stat-card .label { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; }
+        .stat-card .value { font-size: 20px; font-weight: 700; color: #e2e8f0; margin-top: 4px; }
+        .stat-card .value.purple { color: #8b5cf6; }
+        .chart-container { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 12px; margin-bottom: 8px; }
+        .chart-container canvas { max-height: 160px; }
+        .chat-area { flex: 1; display: flex; flex-direction: column; }
+        .messages { flex: 1; overflow-y: auto; padding: 24px; }
+        .message { max-width: 800px; margin: 0 auto 20px; display: flex; gap: 12px; }
+        .message.user { flex-direction: row-reverse; }
+        .avatar { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+        .message.user .avatar { background: #8b5cf6; color: white; }
+        .message.assistant .avatar { background: #334155; color: #8b5cf6; }
+        .bubble { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 12px 16px; max-width: 70%; line-height: 1.6; font-size: 14px; }
+        .message.user .bubble { background: #7c3aed; border-color: #7c3aed; color: white; }
+        .bubble p { margin-bottom: 8px; }
+        .bubble p:last-child { margin-bottom: 0; }
+        .sources { margin-top: 10px; padding-top: 10px; border-top: 1px solid #334155; }
+        .source-tag { display: inline-block; background: #0f172a; border: 1px solid #334155; border-radius: 4px; padding: 2px 8px; font-size: 11px; color: #8b5cf6; margin: 2px 4px 2px 0; }
+        .confidence { font-size: 11px; color: #94a3b8; margin-top: 6px; }
+        .confidence span { color: #8b5cf6; font-weight: 600; }
+        .input-area { padding: 16px 24px; background: #1e293b; border-top: 1px solid #334155; }
+        .input-wrapper { max-width: 800px; margin: 0 auto; display: flex; gap: 8px; }
+        .input-wrapper input { flex: 1; background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 12px 16px; color: #e2e8f0; font-size: 14px; outline: none; transition: border-color 0.2s; }
+        .input-wrapper input:focus { border-color: #8b5cf6; }
+        .input-wrapper input::placeholder { color: #64748b; }
+        .btn { background: #8b5cf6; border: none; border-radius: 8px; padding: 12px 20px; color: white; font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+        .btn:hover { background: #7c3aed; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .welcome { text-align: center; padding: 60px 24px; max-width: 600px; margin: 0 auto; }
+        .welcome h2 { font-size: 24px; color: #8b5cf6; margin-bottom: 8px; }
+        .welcome p { color: #94a3b8; margin-bottom: 24px; }
+        .suggestions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .suggestion { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px; cursor: pointer; transition: border-color 0.2s; font-size: 13px; color: #94a3b8; text-align: left; }
+        .suggestion:hover { border-color: #8b5cf6; color: #e2e8f0; }
+        .typing { display: inline-flex; gap: 4px; padding: 4px 0; }
+        .typing span { width: 6px; height: 6px; background: #8b5cf6; border-radius: 50%; animation: bounce 1.4s infinite; }
+        .typing span:nth-child(2) { animation-delay: 0.2s; }
+        .typing span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes bounce { 0%, 80%, 100% { transform: translateY(0); } 40% { transform: translateY(-6px); } }
+        .mode-tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+        .mode-tab { flex: 1; background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 8px; text-align: center; font-size: 12px; cursor: pointer; transition: all 0.2s; color: #94a3b8; }
+        .mode-tab.active { background: #8b5cf6; border-color: #8b5cf6; color: white; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>Oil & Gas Assistant</h1>
+            <div class="subtitle">RAG-powered Q&A for oil & gas documentation</div>
+        </div>
+        <div class="status">
+            <div class="status-dot" id="statusDot"></div>
+            <span style="font-size: 12px; color: #94a3b8;" id="statusText">Connecting...</span>
+        </div>
+    </div>
+    <div class="main">
+        <div class="sidebar">
+            <h3>System Stats</h3>
+            <div class="stat-card">
+                <div class="label">Documents Indexed</div>
+                <div class="value purple" id="statDocs">--</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Text Chunks</div>
+                <div class="value" id="statChunks">--</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Vocabulary Size</div>
+                <div class="value" id="statVocab">--</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Avg Confidence</div>
+                <div class="value" id="statConfidence">--</div>
+            </div>
+            <div class="chart-container">
+                <canvas id="categoryChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <canvas id="confidenceChart"></canvas>
+            </div>
+            <div style="margin-top: auto; padding-top: 12px; border-top: 1px solid #334155;">
+                <div style="font-size: 11px; color: #64748b;">Elaborado por Ing. Kelvin Cabrera</div>
+                <div style="font-size: 11px; color: #64748b;">v1.0.0</div>
+            </div>
+        </div>
+        <div class="chat-area">
+            <div class="messages" id="messages">
+                <div class="welcome" id="welcome">
+                    <h2>Oil & Gas Knowledge Base</h2>
+                    <p>Ask questions about drilling, safety, equipment, production, and reservoir engineering.</p>
+                    <div class="suggestions">
+                        <button class="suggestion" onclick="askQuestion('What is rotary drilling?')">What is rotary drilling?</button>
+                        <button class="suggestion" onclick="askQuestion('OSHA confined space requirements')">OSHA confined space requirements</button>
+                        <button class="suggestion" onclick="askQuestion('How do ESPs work?')">How do ESPs work?</button>
+                        <button class="suggestion" onclick="askQuestion('Enhanced oil recovery methods')">EOR methods</button>
+                        <button class="suggestion" onclick="askQuestion('Blowout prevention procedures')">Blowout prevention</button>
+                        <button class="suggestion" onclick="askQuestion('Pipeline design standards')">Pipeline design</button>
+                    </div>
+                </div>
+            </div>
+            <div class="input-area">
+                <div class="input-wrapper">
+                    <input type="text" id="queryInput" placeholder="Ask about oil & gas topics..." onkeydown="if(event.key==='Enter')sendQuery()">
+                    <button class="btn" id="sendBtn" onclick="sendQuery()">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        let confidenceHistory = [];
+        let categoryCounts = {};
+        let categoryChart, confidenceChart;
+
+        function initCharts() {
+            const catCtx = document.getElementById('categoryChart').getContext('2d');
+            categoryChart = new Chart(catCtx, {
+                type: 'doughnut',
+                data: { labels: [], datasets: [{ data: [], backgroundColor: ['#8b5cf6','#22c55e','#f59e0b','#ef4444','#06b6d4'] }] },
+                options: { responsive: true, plugins: { legend: { labels: { color: '#94a3b8', font: { size: 10 } } }, title: { display: true, text: 'Categories Retrieved', color: '#94a3b8', font: { size: 11 } } } }
+            });
+            const confCtx = document.getElementById('confidenceChart').getContext('2d');
+            confidenceChart = new Chart(confCtx, {
+                type: 'line',
+                data: { labels: [], datasets: [{ label: 'Confidence', data: [], borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.1)', fill: true, tension: 0.3, pointRadius: 3, pointBackgroundColor: '#8b5cf6' }] },
+                options: { responsive: true, scales: { x: { display: false }, y: { min: 0, max: 1, ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: '#1e293b' } } }, plugins: { legend: { display: false }, title: { display: true, text: 'Confidence Over Time', color: '#94a3b8', font: { size: 11 } } } }
+            });
+        }
+
+        function updateStats(data) {
+            if (data.sources) {
+                data.sources.forEach(s => {
+                    categoryCounts[s.category] = (categoryCounts[s.category] || 0) + 1;
+                });
+                categoryChart.data.labels = Object.keys(categoryCounts);
+                categoryChart.data.datasets[0].data = Object.values(categoryCounts);
+                categoryChart.update();
+            }
+            if (data.confidence !== undefined) {
+                confidenceHistory.push(data.confidence);
+                if (confidenceHistory.length > 10) confidenceHistory.shift();
+                confidenceChart.data.labels = confidenceHistory.map((_, i) => i + 1);
+                confidenceChart.data.datasets[0].data = confidenceHistory;
+                confidenceChart.update();
+                document.getElementById('statConfidence').textContent = (confidenceHistory.reduce((a, b) => a + b, 0) / confidenceHistory.length * 100).toFixed(1) + '%';
+            }
+        }
+
+        function addMessage(role, content, sources, confidence) {
+            const welcome = document.getElementById('welcome');
+            if (welcome) welcome.remove();
+            const messages = document.getElementById('messages');
+            const msg = document.createElement('div');
+            msg.className = `message ${role}`;
+            const avatarText = role === 'user' ? 'You' : 'AI';
+            let sourcesHtml = '';
+            if (sources && sources.length > 0) {
+                sourcesHtml = '<div class="sources">' + sources.map(s =>
+                    `<span class="source-tag">${s.title} (${s.category}) [${(s.relevance_score * 100).toFixed(1)}%]</span>`
+                ).join('') + '</div>';
+            }
+            let confHtml = '';
+            if (confidence !== undefined && role === 'assistant') {
+                confHtml = `<div class="confidence">Relevance: <span>${(confidence * 100).toFixed(1)}%</span></div>`;
+            }
+            msg.innerHTML = `
+                <div class="avatar">${avatarText}</div>
+                <div class="bubble"><p>${content.replace(/\n/g, '<br>')}</p>${sourcesHtml}${confHtml}</div>
+            `;
+            messages.appendChild(msg);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        function addTyping() {
+            const messages = document.getElementById('messages');
+            const msg = document.createElement('div');
+            msg.className = 'message assistant';
+            msg.id = 'typingIndicator';
+            msg.innerHTML = `<div class="avatar">AI</div><div class="bubble"><div class="typing"><span></span><span></span><span></span></div></div>`;
+            messages.appendChild(msg);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        function removeTyping() {
+            const el = document.getElementById('typingIndicator');
+            if (el) el.remove();
+        }
+
+        async function sendQuery() {
+            const input = document.getElementById('queryInput');
+            const query = input.value.trim();
+            if (!query) return;
+            input.value = '';
+            addMessage('user', query);
+            addTyping();
+            document.getElementById('sendBtn').disabled = true;
+            try {
+                const resp = await fetch('/api/ask', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: query })
+                });
+                const data = await resp.json();
+                removeTyping();
+                if (data.error) {
+                    addMessage('assistant', data.error);
+                } else {
+                    addMessage('assistant', data.answer, data.sources, data.confidence);
+                    updateStats(data);
+                    document.getElementById('statDocs').textContent = data.num_retrieved || '--';
+                }
+            } catch (e) {
+                removeTyping();
+                addMessage('assistant', 'Error connecting to server. Please try again.');
+            }
+            document.getElementById('sendBtn').disabled = false;
+        }
+
+        function askQuestion(q) {
+            document.getElementById('queryInput').value = q;
+            sendQuery();
+        }
+
+        async function loadStats() {
+            try {
+                const resp = await fetch('/api/models');
+                const data = await resp.json();
+                const s = data.stats || {};
+                document.getElementById('statDocs').textContent = s.total_documents || '--';
+                document.getElementById('statChunks').textContent = s.total_chunks || '--';
+                document.getElementById('statVocab').textContent = s.vocabulary_size || '--';
+                document.getElementById('statusDot').style.background = '#22c55e';
+                document.getElementById('statusText').textContent = 'Connected';
+            } catch (e) {
+                document.getElementById('statusDot').style.background = '#ef4444';
+                document.getElementById('statusText').textContent = 'Disconnected';
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initCharts();
+            loadStats();
+        });
+    </script>
+</body>
+</html>
