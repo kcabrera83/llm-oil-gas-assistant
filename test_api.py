@@ -7,19 +7,19 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from fastapi.testclient import TestClient
 from app import app, load_models
 
 
 def get_test_client():
     load_models()
-    app.config["TESTING"] = True
-    return app.test_client()
+    return TestClient(app)
 
 
 def test_health(client):
     resp = client.get("/api/health")
     assert resp.status_code == 200
-    data = resp.get_json()
+    data = resp.json()
     assert data["status"] == "healthy"
     print("[PASS] /api/health")
     return data
@@ -28,7 +28,7 @@ def test_health(client):
 def test_models(client):
     resp = client.get("/api/models")
     assert resp.status_code == 200
-    data = resp.get_json()
+    data = resp.json()
     assert "loaded_models" in data
     assert "stats" in data
     print(f"[PASS] /api/models - Models: {data['loaded_models']}")
@@ -39,7 +39,7 @@ def test_ask_valid(client):
     payload = {"query": "What is rotary drilling?"}
     resp = client.post("/api/ask", json=payload)
     assert resp.status_code == 200
-    data = resp.get_json()
+    data = resp.json()
     assert "answer" in data
     assert "confidence" in data
     assert "sources" in data
@@ -52,14 +52,14 @@ def test_ask_no_query(client):
     resp = client.post("/api/ask", json={"query": ""})
     assert resp.status_code == 400
     print("[PASS] /api/ask (empty query)")
-    return resp.get_json()
+    return resp.json()
 
 
 def test_ask_safety(client):
     payload = {"query": "What are the OSHA confined space requirements?"}
     resp = client.post("/api/ask", json=payload)
     assert resp.status_code == 200
-    data = resp.get_json()
+    data = resp.json()
     assert data["confidence"] > 0
     print(f"[PASS] /api/ask (safety) - Confidence: {data['confidence']:.4f}")
     return data
@@ -69,7 +69,7 @@ def test_search(client):
     payload = {"query": "blowout preventer BOP well control", "top_k": 5}
     resp = client.post("/api/search", json=payload)
     assert resp.status_code == 200
-    data = resp.get_json()
+    data = resp.json()
     assert "results" in data
     assert len(data["results"]) > 0
     print(f"[PASS] /api/search - Found {data['total_results']} results")
@@ -80,7 +80,7 @@ def test_search_no_query(client):
     resp = client.post("/api/search", json={"query": ""})
     assert resp.status_code == 400
     print("[PASS] /api/search (empty query)")
-    return resp.get_json()
+    return resp.json()
 
 
 def test_summarize(client):
@@ -97,7 +97,7 @@ def test_summarize(client):
     payload = {"text": text, "num_sentences": 2}
     resp = client.post("/api/summarize", json=payload)
     assert resp.status_code == 200
-    data = resp.get_json()
+    data = resp.json()
     assert "summary" in data
     assert len(data["summary"]) > 0
     print(f"[PASS] /api_summarize - Summary length: {len(data['summary'])} chars")
@@ -108,14 +108,14 @@ def test_summarize_no_text(client):
     resp = client.post("/api/summarize", json={"text": ""})
     assert resp.status_code == 400
     print("[PASS] /api/summarize (empty text)")
-    return resp.get_json()
+    return resp.json()
 
 
 def test_ask_equipment(client):
     payload = {"query": "How does an electric submersible pump work?"}
     resp = client.post("/api/ask", json=payload)
     assert resp.status_code == 200
-    data = resp.get_json()
+    data = resp.json()
     assert data["confidence"] > 0
     print(f"[PASS] /api/ask (equipment) - Confidence: {data['confidence']:.4f}")
     return data
@@ -125,7 +125,7 @@ def test_ask_production(client):
     payload = {"query": "What are the methods for enhanced oil recovery?"}
     resp = client.post("/api/ask", json=payload)
     assert resp.status_code == 200
-    data = resp.get_json()
+    data = resp.json()
     assert data["confidence"] > 0
     print(f"[PASS] /api/ask (production) - Confidence: {data['confidence']:.4f}")
     return data
